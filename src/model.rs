@@ -1,10 +1,10 @@
 use std::{path::Path, sync::Mutex};
 
 use anyhow::Result;
-use image::{imageops, DynamicImage, EncodableLayout, Rgb, RgbImage};
+use image::{DynamicImage, EncodableLayout, imageops, Rgb, RgbImage};
 use ndarray::{concatenate, prelude::*};
 use num_traits::AsPrimitive;
-use ort::{CUDAExecutionProvider, Session};
+use ort::Session;
 
 use crate::labels::{LabelAnalyzer, TagScores};
 
@@ -58,9 +58,12 @@ impl Predictor {
         label_analyzer: LabelAnalyzer,
     ) -> Result<Self> {
         let session = Session::builder()?
-            .with_execution_providers([CUDAExecutionProvider::default()
-                .with_device_id(device_id)
-                .build()])?
+            .with_execution_providers([
+                #[cfg(feature = "cuda")]
+                ort::CUDAExecutionProvider::default()
+                    .with_device_id(device_id)
+                    .build(),
+            ])?
             .commit_from_file(model_path)?;
 
         let target_size = session.inputs[0].input_type.tensor_dimensions().unwrap()[1].as_();
