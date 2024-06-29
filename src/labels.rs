@@ -16,9 +16,9 @@ pub struct LabelAnalyzer {
     character_indices: Vec<usize>,
 }
 
-pub type TagScores<'a> = Vec<(&'a String, f32)>;
+pub type TagScores<'a> = Vec<(&'a str, f32)>;
 
-fn mcut_threshold(probs: Vec<&f32>) -> f32 {
+fn mcut_threshold(probs: &Vec<&f32>) -> f32 {
     let mut sorted_probs = probs.to_owned();
     sorted_probs.sort_by(|a, b| b.partial_cmp(a).unwrap());
 
@@ -84,7 +84,7 @@ impl LabelAnalyzer {
         let mut ratings: Vec<_> = self
             .rating_indices
             .iter()
-            .map(|&i| (&self.tags[i], preds[i]))
+            .map(|&i| (self.tags[i].as_str(), preds[i]))
             .collect();
         ratings.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
@@ -103,15 +103,15 @@ impl LabelAnalyzer {
             .general_indices
             .iter()
             .filter(|&&i| preds[i] >= general_threshold)
-            .map(|&i| (&self.tags[i], preds[i]))
+            .map(|&i| (self.tags[i].as_str(), preds[i]))
             .collect();
 
         if general_mcut_enabled {
             let general_probs: Vec<_> = general.iter().map(|(_, p)| p).collect();
-            let general_threshold = mcut_threshold(general_probs);
+            let general_threshold = mcut_threshold(&general_probs);
             general = general
                 .into_iter()
-                .filter(|(_, p)| p >= &general_threshold)
+                .filter(|&(_, p)| p >= general_threshold)
                 .collect();
         }
         general.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
@@ -120,15 +120,15 @@ impl LabelAnalyzer {
             .character_indices
             .iter()
             .filter(|&&i| preds[i] >= character_threshold)
-            .map(|&i| (&self.tags[i], preds[i]))
+            .map(|&i| (self.tags[i].as_str(), preds[i]))
             .collect();
 
         if character_mcut_enabled {
             let character_probs: Vec<_> = character.iter().map(|(_, p)| p).collect();
-            let character_threshold = mcut_threshold(character_probs);
+            let character_threshold = mcut_threshold(&character_probs);
             character = character
                 .into_iter()
-                .filter(|(_, p)| p >= &character_threshold)
+                .filter(|&(_, p)| p >= character_threshold)
                 .collect();
         }
         character.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());

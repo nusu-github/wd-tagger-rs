@@ -92,7 +92,7 @@ impl Predictor {
 
     pub fn predict(
         &self,
-        batch: Array4<f32>,
+        batch: ArrayView4<f32>,
         general_threshold: f32,
         general_mcut_enabled: bool,
         character_threshold: f32,

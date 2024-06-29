@@ -49,7 +49,7 @@ impl ImageProcessor {
             .collect::<Result<_>>()?;
         let batch = model.preprocess(images)?;
         let labels = model.predict(
-            batch,
+            batch.view(),
             self.general_threshold,
             self.general_mcut_enabled,
             self.character_threshold,
