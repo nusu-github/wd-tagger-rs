@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 
+use anyhow::Result;
 use image::ImageFormat;
-use indicatif::{ParallelProgressIterator, ProgressStyle};
-use rayon::prelude::*;
+use indicatif::{ProgressIterator, ProgressStyle};
 use walkdir::WalkDir;
 
 use crate::image_processor::ImageProcessor;
@@ -27,18 +27,19 @@ impl ProgressTracker {
         }
     }
 
-    pub fn process(self, processor: ImageProcessor, model: Predictor) {
+    pub fn process(self, processor: &ImageProcessor, model: &Predictor) -> Result<()> {
         let style = ProgressStyle::default_bar()
             .template(
                 "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})",
-            )
-            .unwrap()
+            )?
             .progress_chars("#>-");
 
         self.image_paths
-            .into_par_iter()
+            .iter()
             .progress_with_style(style)
-            .map(|batch| processor.process(batch, &model))
-            .collect::<Vec<_>>();
+            .map(|batch| processor.process(batch, model))
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(())
     }
 }

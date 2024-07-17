@@ -7,6 +7,7 @@
 WaifuDiffusion Taggerは、アニメスタイルのイラストを分析し、画像内のさまざまな要素を説明するタグのリストを提供するツールです。これらのタグには、キャラクターの特徴、衣装アイテム、アートスタイルなどが含まれます。
 
 オリジナルプロジェクト:
+
 - リポジトリ: [SmilingWolf/SW-CV-ModelZoo](https://github.com/SmilingWolf/SW-CV-ModelZoo)
 - Hugging Faceデモ: [SmilingWolf/wd-tagger](https://huggingface.co/spaces/SmilingWolf/wd-tagger)
 
@@ -47,12 +48,13 @@ wd-tagger-rs
 
 ### オプション
 
-- `-i, --input-dir <INPUT_DIR>`: 処理するアニメスタイルの画像を含む入力ディレクトリ
-- `-o, --output-dir <OUTPUT_DIR>`: 生成されたタグの出力ディレクトリ
-- `-m, --model-path <MODEL_PATH>`: ONNXモデルファイルへのパス（オリジナルのWaifuDiffusion Taggerモデルから変換したもの）
-- `-c, --csv-path <CSV_PATH>`: ラベル情報を含むCSVファイルへのパス
+- `<INPUT_DIR>`: 処理するアニメスタイルの画像を含む入力ディレクトリ
+- `<OUTPUT_DIR>`: 生成されたタグの出力ディレクトリ
+- `-m, --model_name <MODEL_NAME>`: モデル名 （デフォルト：wd-swinv2-tagger-v3）
 - `-d, --device-id <DEVICE_ID>`: GPUデバイスID（デフォルト：0）
 - `-b, --batch-size <BATCH_SIZE>`: 処理のバッチサイズ（デフォルト：1）
+- `--model-path <MODEL_PATH>`: ONNXモデルファイルへのパス（オリジナルのWaifuDiffusion Taggerモデルから変換したもの）
+- `--csv-path <CSV_PATH>`: ラベル情報を含むCSVファイルへのパス
 - `--general-threshold <GENERAL_THRESHOLD>`: 一般的な分類のしきい値（デフォルト：0.35）
 - `--general-mcut-enabled`: 一般的な分類でMCUTを有効にする
 - `--character-threshold <CHARACTER_THRESHOLD>`: キャラクター分類のしきい値（デフォルト：0.85）
@@ -61,7 +63,7 @@ wd-tagger-rs
 ### 例
 
 ```
-wd-tagger-rs -i /path/to/anime/images -o /path/to/output -m /path/to/wd-tagger-model.onnx -c /path/to/labels.csv --general-threshold 0.4 --character-threshold 0.8 --general-mcut-enabled
+wd-tagger-rs -m wd-swinv2-tagger-v3 --general-threshold 0.4 --character-threshold 0.8 --general-mcut-enabled /path/to/images /path/to/output
 ```
 
 ## 出力

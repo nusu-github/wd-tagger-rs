@@ -18,7 +18,7 @@ pub struct LabelAnalyzer {
 
 pub type TagScores<'a> = Vec<(&'a str, f32)>;
 
-fn mcut_threshold(probs: &Vec<&f32>) -> f32 {
+fn mcut_threshold(probs: &[&f32]) -> f32 {
     let mut sorted_probs = probs.to_owned();
     sorted_probs.sort_by(|a, b| b.partial_cmp(a).unwrap());
 
@@ -34,10 +34,7 @@ fn mcut_threshold(probs: &Vec<&f32>) -> f32 {
 }
 
 impl LabelAnalyzer {
-    pub fn new<P>(csv_path: &P) -> Result<Self>
-    where
-        P: AsRef<Path>,
-    {
+    pub fn new<P: AsRef<Path>>(csv_path: &P) -> Result<Self> {
         const KAOMOJIS: &[&str] = &[
             "0_0", "(o)_(o)", "+_+", "+_-", "._.", "<o>_<o>", "<|>_<|>", "=_=", ">_<", "3_3",
             "6_9", ">_o", "@_@", "^_^", "o_o", "u_u", "x_x", "|_|", "||_||",
@@ -47,10 +44,11 @@ impl LabelAnalyzer {
         const CHARACTER: u32 = 4;
 
         let mut reader = csv::Reader::from_path(csv_path)?;
-        let mut tags = Vec::new();
-        let mut rating_indices = Vec::new();
-        let mut general_indices = Vec::new();
-        let mut character_indices = Vec::new();
+        let len = reader.headers()?.len() - 1;
+        let mut tags = Vec::with_capacity(len);
+        let mut rating_indices = Vec::with_capacity(len);
+        let mut general_indices = Vec::with_capacity(len);
+        let mut character_indices = Vec::with_capacity(len);
         for (i, result) in reader.deserialize().enumerate() {
             let label: Label = result?;
             let tag = match KAOMOJIS.contains(&label.name.as_str()) {
@@ -65,6 +63,7 @@ impl LabelAnalyzer {
                 _ => (),
             }
         }
+
         Ok(Self {
             tags,
             rating_indices,
@@ -88,15 +87,13 @@ impl LabelAnalyzer {
             .collect();
         ratings.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-        let general_threshold = if general_mcut_enabled {
-            0.0
-        } else {
-            general_threshold
+        let general_threshold = match general_mcut_enabled {
+            true => 0.0,
+            false => general_threshold,
         };
-        let character_threshold = if character_mcut_enabled {
-            0.0
-        } else {
-            character_threshold
+        let character_threshold = match general_mcut_enabled {
+            true => 0.0,
+            false => character_threshold,
         };
 
         let mut general: Vec<_> = self
