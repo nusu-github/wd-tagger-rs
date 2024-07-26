@@ -1,7 +1,21 @@
 use std::path::Path;
+use std::sync::OnceLock;
 
 use anyhow::Result;
 use ndarray::prelude::*;
+
+const KAOMOJIS: &[&str] = &[
+    "0_0", "(o)_(o)", "+_+", "+_-", "._.", "<o>_<o>", "<|>_<|>", "=_=", ">_<", "3_3", "6_9", ">_o",
+    "@_@", "^_^", "o_o", "u_u", "x_x", "|_|", "||_||",
+];
+const RATING: u32 = 9;
+const GENERAL: u32 = 0;
+const CHARACTER: u32 = 4;
+
+static TAGS: OnceLock<&[&str]> = OnceLock::new();
+static RATING_INDICES: OnceLock<&[usize]> = OnceLock::new();
+static GENERAL_INDICES: OnceLock<&[usize]> = OnceLock::new();
+static CHARACTER_INDICES: OnceLock<&[usize]> = OnceLock::new();
 
 #[derive(serde::Deserialize)]
 struct Label {
@@ -10,126 +24,115 @@ struct Label {
 }
 
 pub struct LabelAnalyzer {
-    tags: Vec<String>,
-    rating_indices: Vec<usize>,
-    general_indices: Vec<usize>,
-    character_indices: Vec<usize>,
+    general_threshold: f32,
+    general_mcut_enabled: bool,
+    character_threshold: f32,
+    character_mcut_enabled: bool,
 }
 
-pub type TagScores<'a> = Vec<(&'a str, f32)>;
-
-fn mcut_threshold(probs: &[&f32]) -> f32 {
-    let mut sorted_probs = probs.to_owned();
-    sorted_probs.sort_by(|a, b| b.partial_cmp(a).unwrap());
-
-    let t = sorted_probs
-        .windows(2)
-        .map(|w| w[0] - w[1])
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-        .unwrap()
-        .0;
-
-    (sorted_probs[t] + sorted_probs[t + 1]) / 2.0
-}
+pub type TagScores = Vec<(&'static str, f32)>;
 
 impl LabelAnalyzer {
-    pub fn new<P: AsRef<Path>>(csv_path: &P) -> Result<Self> {
-        const KAOMOJIS: &[&str] = &[
-            "0_0", "(o)_(o)", "+_+", "+_-", "._.", "<o>_<o>", "<|>_<|>", "=_=", ">_<", "3_3",
-            "6_9", ">_o", "@_@", "^_^", "o_o", "u_u", "x_x", "|_|", "||_||",
-        ];
-        const RATING: u32 = 9;
-        const GENERAL: u32 = 0;
-        const CHARACTER: u32 = 4;
-
+    pub fn new<P: AsRef<Path>>(
+        csv_path: P,
+        general_threshold: f32,
+        general_mcut_enabled: bool,
+        character_threshold: f32,
+        character_mcut_enabled: bool,
+    ) -> Result<Self> {
         let mut reader = csv::Reader::from_path(csv_path)?;
         let len = reader.headers()?.len() - 1;
         let mut tags = Vec::with_capacity(len);
         let mut rating_indices = Vec::with_capacity(len);
         let mut general_indices = Vec::with_capacity(len);
         let mut character_indices = Vec::with_capacity(len);
+
         for (i, result) in reader.deserialize().enumerate() {
             let label: Label = result?;
-            let tag = match KAOMOJIS.contains(&label.name.as_str()) {
-                true => label.name,
-                false => label.name.replace('_', ""),
+            let tag = if KAOMOJIS.contains(&label.name.as_str()) {
+                label.name
+            } else {
+                label.name.replace('_', "")
             };
-            tags.push(tag);
+            tags.push(Box::leak(tag.into_boxed_str()) as &str);
             match label.category {
                 RATING => rating_indices.push(i),
                 GENERAL => general_indices.push(i),
                 CHARACTER => character_indices.push(i),
-                _ => (),
+                _ => unreachable!(),
             }
         }
 
+        TAGS.set(Box::leak(tags.into_boxed_slice())).unwrap();
+        RATING_INDICES
+            .set(Box::leak(rating_indices.into_boxed_slice()))
+            .unwrap();
+        GENERAL_INDICES
+            .set(Box::leak(general_indices.into_boxed_slice()))
+            .unwrap();
+        CHARACTER_INDICES
+            .set(Box::leak(character_indices.into_boxed_slice()))
+            .unwrap();
+
         Ok(Self {
-            tags,
-            rating_indices,
-            general_indices,
-            character_indices,
+            general_threshold,
+            general_mcut_enabled,
+            character_threshold,
+            character_mcut_enabled,
         })
     }
 
-    pub fn analyze(
-        &self,
-        preds: ArrayView1<f32>,
-        general_threshold: f32,
-        general_mcut_enabled: bool,
-        character_threshold: f32,
-        character_mcut_enabled: bool,
-    ) -> (TagScores, TagScores, TagScores) {
-        let mut ratings: Vec<_> = self
-            .rating_indices
-            .iter()
-            .map(|&i| (self.tags[i].as_str(), preds[i]))
-            .collect();
-        ratings.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    pub fn analyze(&self, preds: ArrayView1<f32>) -> (TagScores, TagScores, TagScores) {
+        let mut ratings = tag_scores(preds, RATING_INDICES.get().unwrap());
+        ratings.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-        let general_threshold = match general_mcut_enabled {
-            true => 0.0,
-            false => general_threshold,
-        };
-        let character_threshold = match general_mcut_enabled {
-            true => 0.0,
-            false => character_threshold,
-        };
+        let general = tag_scores(preds, GENERAL_INDICES.get().unwrap());
+        let mut general = filter_tags(general, self.general_threshold, self.general_mcut_enabled);
+        general.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-        let mut general: Vec<_> = self
-            .general_indices
-            .iter()
-            .filter(|&&i| preds[i] >= general_threshold)
-            .map(|&i| (self.tags[i].as_str(), preds[i]))
-            .collect();
-
-        if general_mcut_enabled {
-            let general_probs: Vec<_> = general.iter().map(|(_, p)| p).collect();
-            let general_threshold = mcut_threshold(&general_probs);
-            general = general
-                .into_iter()
-                .filter(|&(_, p)| p >= general_threshold)
-                .collect();
-        }
-        general.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-
-        let mut character: Vec<_> = self
-            .character_indices
-            .iter()
-            .filter(|&&i| preds[i] >= character_threshold)
-            .map(|&i| (self.tags[i].as_str(), preds[i]))
-            .collect();
-
-        if character_mcut_enabled {
-            let character_probs: Vec<_> = character.iter().map(|(_, p)| p).collect();
-            let character_threshold = mcut_threshold(&character_probs);
-            character = character
-                .into_iter()
-                .filter(|&(_, p)| p >= character_threshold)
-                .collect();
-        }
-        character.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        let character = tag_scores(preds, CHARACTER_INDICES.get().unwrap());
+        let mut character = filter_tags(
+            character,
+            self.character_threshold,
+            self.character_mcut_enabled,
+        );
+        character.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
         (ratings, general, character)
     }
+}
+
+fn tag_scores(preds: ArrayView1<f32>, indices: &[usize]) -> TagScores {
+    let tags = TAGS.get().unwrap();
+    indices.iter().map(|&i| (tags[i], preds[i])).collect()
+}
+
+fn filter_tags(tag_scores: TagScores, threshold: f32, mcut_enabled: bool) -> TagScores {
+    let threshold = if mcut_enabled {
+        let scores_probs: Vec<_> = tag_scores.iter().map(|(_, p)| *p).collect();
+        mcut_threshold(&scores_probs)
+    } else {
+        threshold
+    };
+
+    tag_scores
+        .into_iter()
+        .filter(|(_, p)| *p >= threshold)
+        .collect()
+}
+
+fn mcut_threshold(prediction: &[f32]) -> f32 {
+    let mut sorted = prediction.to_vec();
+    sorted.sort_by(|a, b| b.partial_cmp(a).unwrap());
+
+    let difs: Vec<_> = sorted.windows(2).map(|w| w[0] - w[1]).collect();
+
+    let t = difs
+        .iter()
+        .enumerate()
+        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+
+    (sorted[t] + sorted[t + 1]) / 2.0
 }

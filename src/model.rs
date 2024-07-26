@@ -1,108 +1,72 @@
 use std::path::Path;
 
 use anyhow::Result;
-use image::{imageops, DynamicImage, Rgb, RgbImage};
-use ndarray::{prelude::*, stack};
-use num_traits::AsPrimitive;
+use image::{DynamicImage, imageops, Rgb, RgbImage};
+use ndarray::prelude::*;
 use ort::Session;
-use rayon::prelude::*;
 
-use crate::labels::{LabelAnalyzer, TagScores};
-
-pub struct Predictor {
+pub struct Model {
     session: Session,
-    input_name: String,
-    output_name: String,
-    target_size: u32,
-    label_analyzer: LabelAnalyzer,
+    input_name: &'static str,
+    output_name: &'static str,
+    pub target_size: u32,
 }
 
-impl Predictor {
-    pub fn new<P: AsRef<Path>>(
-        model_path: P,
-        device_id: i32,
-        label_analyzer: LabelAnalyzer,
-    ) -> Result<Self> {
+impl Model {
+    pub fn new<P: AsRef<Path>>(model_path: P, device_id: i32) -> Result<Self> {
         let session = Session::builder()?
             .with_execution_providers([ort::CUDAExecutionProvider::default()
                 .with_device_id(device_id)
                 .build()])?
             .commit_from_file(model_path)?;
 
-        let target_size = session.inputs[0].input_type.tensor_dimensions().unwrap()[1].as_();
-        let input_name = session.inputs[0].name.to_string();
-        let output_name = session.outputs[0].name.to_string();
+        let target_size = session.inputs[0].input_type.tensor_dimensions().unwrap()[1] as u32;
+        let input_name = session.inputs[0].name.clone();
+        let output_name = session.outputs[0].name.clone();
 
         Ok(Self {
             session,
-            input_name,
-            output_name,
+            input_name: Box::leak(input_name.into_boxed_str()) as &str,
+            output_name: Box::leak(output_name.into_boxed_str()) as &str,
             target_size,
-            label_analyzer,
         })
     }
 
-    pub fn preprocess(&self, images: &[DynamicImage]) -> Result<Array4<f32>> {
-        let preprocessed = images
-            .par_iter()
-            .map(|img| preprocess(img, self.target_size))
-            .collect::<Result<Vec<_>>>()?;
-        let batch = stack(
-            Axis(0),
-            &preprocessed.iter().map(|t| t.view()).collect::<Vec<_>>(),
-        )?;
-        Ok(batch)
-    }
-
-    pub fn predict(
-        &self,
-        batch: ArrayView4<f32>,
-        general_threshold: f32,
-        general_mcut_enabled: bool,
-        character_threshold: f32,
-        character_mcut_enabled: bool,
-    ) -> Result<Vec<(TagScores, TagScores, TagScores)>> {
-        let outputs = self.session.run(ort::inputs![&self.input_name => batch]?)?;
-        let preds = outputs[self.output_name.as_str()]
+    pub fn predict(&self, inputs: ArrayView4<f32>) -> Result<Array2<f32>> {
+        let outputs = self.session.run(ort::inputs![self.input_name => inputs]?)?;
+        Ok(outputs[self.output_name]
             .try_extract_tensor::<f32>()?
-            .into_dimensionality::<Ix2>()?;
-
-        Ok(preds
-            .axis_iter(Axis(0))
-            .map(|p| {
-                self.label_analyzer.analyze(
-                    p,
-                    general_threshold,
-                    general_mcut_enabled,
-                    character_threshold,
-                    character_mcut_enabled,
-                )
-            })
-            .collect())
+            .into_dimensionality::<Ix2>()?
+            .to_owned())
     }
 }
 
-fn preprocess(image: &DynamicImage, target_size: u32) -> Result<Array3<f32>> {
+pub fn preprocess(image: &DynamicImage, target_size: u32) -> Result<Array3<f32>> {
     let image = image.to_rgb8();
     let (w, h) = image.dimensions();
     let max_dim = w.max(h);
-    let pad = |x| <_ as AsPrimitive<_>>::as_((max_dim - x) / 2);
+    let pad = |x| ((max_dim - x) / 2) as i64;
+
     let mut padded = RgbImage::from_pixel(max_dim, max_dim, Rgb([255, 255, 255]));
     imageops::overlay(&mut padded, &image, pad(w), pad(h));
-    let resized = match max_dim != target_size {
-        true => imageops::resize(
+
+    let resized = if max_dim != target_size {
+        imageops::resize(
             &padded,
             target_size,
             target_size,
             imageops::FilterType::Lanczos3,
-        ),
-        false => padded,
+        )
+    } else {
+        padded
     };
+
     let tensor = unsafe {
-        ArrayView3::from_shape_ptr((target_size.as_(), target_size.as_(), 3), resized.as_ptr())
-    }
-    .slice(s![ .., .., ..;-1])
-    .mapv(AsPrimitive::as_);
+        ArrayView3::from_shape_ptr(
+            (target_size as usize, target_size as usize, 3),
+            resized.as_ptr(),
+        )
+    }.mapv(|x| x as f32);
 
     Ok(tensor)
 }
