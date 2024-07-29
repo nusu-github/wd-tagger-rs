@@ -2,7 +2,6 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use anyhow::Result;
-use ndarray::prelude::*;
 
 const KAOMOJIS: &[&str] = &[
     "0_0", "(o)_(o)", "+_+", "+_-", "._.", "<o>_<o>", "<|>_<|>", "=_=", ">_<", "3_3", "6_9", ">_o",
@@ -82,7 +81,7 @@ impl LabelAnalyzer {
         })
     }
 
-    pub fn analyze(&self, preds: ArrayView1<f32>) -> (TagScores, TagScores, TagScores) {
+    pub fn analyze(&self, preds: &[f32]) -> (TagScores, TagScores, TagScores) {
         let mut ratings = tag_scores(preds, RATING_INDICES.get().unwrap());
         ratings.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
@@ -102,7 +101,7 @@ impl LabelAnalyzer {
     }
 }
 
-fn tag_scores(preds: ArrayView1<f32>, indices: &[usize]) -> TagScores {
+fn tag_scores(preds: &[f32], indices: &[usize]) -> TagScores {
     let tags = TAGS.get().unwrap();
     indices.iter().map(|&i| (tags[i], preds[i])).collect()
 }

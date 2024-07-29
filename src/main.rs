@@ -7,7 +7,7 @@ use crossbeam_channel::{bounded, unbounded};
 use hf_hub::api::sync::Api;
 use image::ImageFormat;
 use indicatif::{MultiProgress, ProgressBar, ProgressFinish, ProgressStyle};
-use ndarray::{Axis, stack};
+use ndarray::{stack, Axis};
 use walkdir::WalkDir;
 
 use crate::model::preprocess;
@@ -88,9 +88,7 @@ fn main() -> Result<()> {
         .filter(|e| ImageFormat::from_path(e.path()).is_ok())
         .map(|e| e.into_path())
         .collect();
-    let batched_paths: Vec<_> = image_paths
-        .chunks(config.batch_size)
-        .collect();
+    let batched_paths: Vec<_> = image_paths.chunks(config.batch_size).collect();
 
     let (load_bar, inference_bar, output_bar) =
         progress(image_paths.len() as u64, batched_paths.len() as u64)?;
@@ -99,27 +97,23 @@ fn main() -> Result<()> {
     let (inference_tx, inference_rx) = unbounded();
 
     rayon::scope(|s| {
-        let cfg = config.clone();
-
         s.spawn(move |s| {
             for paths in batched_paths {
-                let load_tx = load_tx.clone();
-
                 let (result_tx, result_rx) = unbounded();
-                paths.into_iter().enumerate().for_each(|(i, path)| {
+                for (i, path) in paths.iter().enumerate() {
                     s.spawn({
                         let result_tx = result_tx.clone();
                         let load_bar = load_bar.clone();
                         move |_| {
                             load_bar.set_message(path.display().to_string());
-                            let image = image::open(path).unwrap();
+                            let image = image::open(path).unwrap().into_rgb8();
                             let tensor = preprocess(&image, target_size).unwrap();
                             result_tx.send((i, tensor)).unwrap();
 
                             load_bar.inc(1);
                         }
                     })
-                });
+                }
                 drop(result_tx);
 
                 let mut batch: Vec<_> = result_rx.iter().collect();
@@ -137,7 +131,7 @@ fn main() -> Result<()> {
                 let labels = model.predict(batch.view()).unwrap();
                 let labels: Vec<_> = labels
                     .axis_iter(Axis(0))
-                    .map(|x| label_analyzer.analyze(x))
+                    .map(|x| label_analyzer.analyze(x.as_slice().unwrap()))
                     .collect();
                 inference_tx.send((labels, paths)).unwrap();
 
@@ -146,8 +140,8 @@ fn main() -> Result<()> {
         });
 
         s.spawn(move |_| {
-            let input_dir = cfg.input_dir.as_path();
-            let output_dir = cfg.output_dir.as_path();
+            let input_dir = config.input_dir.as_path();
+            let output_dir = config.output_dir.as_path();
 
             while let Ok((labels, paths)) = inference_rx.recv() {
                 let output_dirs: Vec<_> = paths
