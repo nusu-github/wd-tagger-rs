@@ -1,5 +1,4 @@
-use std::path::Path;
-use std::sync::OnceLock;
+use std::{path::Path, sync::OnceLock};
 
 use anyhow::Result;
 
@@ -41,7 +40,7 @@ impl LabelAnalyzer {
     ) -> Result<Self> {
         let mut reader = csv::Reader::from_path(csv_path)?;
         let len = reader.headers()?.len() - 1;
-        let mut tags = Vec::with_capacity(len);
+        let mut tags: Vec<&'static str> = Vec::with_capacity(len);
         let mut rating_indices = Vec::with_capacity(len);
         let mut general_indices = Vec::with_capacity(len);
         let mut character_indices = Vec::with_capacity(len);
@@ -53,7 +52,7 @@ impl LabelAnalyzer {
             } else {
                 label.name.replace('_', "")
             };
-            tags.push(Box::leak(tag.into_boxed_str()) as &str);
+            tags.push(Box::leak(tag.into_boxed_str()));
             match label.category {
                 RATING => rating_indices.push(i),
                 GENERAL => general_indices.push(i),
@@ -130,8 +129,7 @@ fn mcut_threshold(prediction: &[f32]) -> f32 {
         .iter()
         .enumerate()
         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-        .map(|(i, _)| i)
-        .unwrap_or(0);
+        .map_or(0, |(i, _)| i);
 
     (sorted[t] + sorted[t + 1]) / 2.0
 }

@@ -1,5 +1,7 @@
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{ensure, Result};
 use clap::{Parser, ValueEnum};
@@ -7,18 +9,20 @@ use crossbeam_channel::{bounded, unbounded};
 use hf_hub::api::sync::Api;
 use image::ImageFormat;
 use indicatif::{MultiProgress, ProgressBar, ProgressFinish, ProgressStyle};
-use ndarray::{stack, Axis};
-use walkdir::WalkDir;
+use ndarray::{stack, ArrayBase, Axis};
+use walkdir::{DirEntry, WalkDir};
 
 use crate::model::preprocess;
 
 mod labels;
 mod model;
+mod padding;
 
 #[derive(Parser, Clone)]
 #[command(version, about, long_about = None)]
 pub struct Config {
     input_dir: PathBuf,
+    #[arg(default_value = "output")]
     output_dir: PathBuf,
     #[arg(short, long, group = "model", value_enum, default_value_t = ModelName::WdSwinv2TaggerV3)]
     model_name: ModelName,
@@ -65,10 +69,10 @@ const MODELS: &[&str] = &[
 
 fn main() -> Result<()> {
     let config = Config::parse();
-    ensure!(&config.input_dir.exists(), "Input directory does not exist");
+    ensure!(config.input_dir.exists(), "Input directory does not exist");
 
     let api = Api::new()?;
-    let repo = api.model(MODELS[(&config.model_name).to_owned() as usize].to_string());
+    let repo = api.model(MODELS[config.model_name as usize].to_string());
     let model_path = repo.get("model.onnx")?;
     let csv_path = repo.get("selected_tags.csv")?;
 
@@ -82,11 +86,11 @@ fn main() -> Result<()> {
     let model = model::Model::new(&model_path, config.device_id)?;
     let target_size = model.target_size;
 
-    let image_paths: Vec<_> = WalkDir::new(config.input_dir.as_path())
+    let image_paths: Vec<_> = WalkDir::new(&config.input_dir)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(Result::ok)
         .filter(|e| ImageFormat::from_path(e.path()).is_ok())
-        .map(|e| e.into_path())
+        .map(DirEntry::into_path)
         .collect();
     let batched_paths: Vec<_> = image_paths.chunks(config.batch_size).collect();
 
@@ -107,12 +111,12 @@ fn main() -> Result<()> {
                         move |_| {
                             load_bar.set_message(path.display().to_string());
                             let image = image::open(path).unwrap().into_rgb8();
-                            let tensor = preprocess(&image, target_size).unwrap();
+                            let tensor = preprocess(image, target_size);
                             result_tx.send((i, tensor)).unwrap();
 
                             load_bar.inc(1);
                         }
-                    })
+                    });
                 }
                 drop(result_tx);
 
@@ -120,8 +124,11 @@ fn main() -> Result<()> {
                 batch.sort_by(|a, b| a.0.cmp(&b.0));
                 let batch = batch.into_iter().map(|(_, x)| x).collect::<Vec<_>>();
 
-                let batch =
-                    stack(Axis(0), &batch.iter().map(|x| x.view()).collect::<Vec<_>>()).unwrap();
+                let batch = stack(
+                    Axis(0),
+                    &batch.iter().map(ArrayBase::view).collect::<Vec<_>>(),
+                )
+                .unwrap();
                 load_tx.send((batch, paths)).unwrap();
             }
         });
@@ -149,19 +156,19 @@ fn main() -> Result<()> {
                     .map(|p| {
                         let relative = p.strip_prefix(input_dir).unwrap();
                         let output_subdir =
-                            output_dir.join(relative.parent().unwrap_or(Path::new("")));
+                            output_dir.join(relative.parent().unwrap_or_else(|| Path::new("")));
                         fs::create_dir_all(&output_subdir).unwrap();
                         output_subdir
                     })
                     .collect();
 
                 for (i, (_ratings, general, character)) in labels.iter().enumerate() {
-                    let filename = paths[i].file_stem().unwrap().to_str().unwrap();
+                    let filename = paths[i].file_stem().unwrap().to_string_lossy();
                     let output_file = output_dirs[i].join(format!("{filename}.txt"));
                     let tags: Vec<_> = general
                         .iter()
-                        .map(|(t, _)| t.to_string())
-                        .chain(character.iter().map(|(t, _)| t.to_string()))
+                        .map(|&(t, _)| t.to_string())
+                        .chain(character.iter().map(|&(t, _)| t.to_string()))
                         .collect();
                     fs::write(output_file, tags.join(", ")).unwrap();
 

@@ -3,7 +3,11 @@ use std::path::Path;
 use anyhow::Result;
 use image::{imageops, Rgb, RgbImage};
 use ndarray::prelude::*;
+use nshare::AsNdarray3;
+use num_traits::AsPrimitive;
 use ort::Session;
+
+use crate::padding::Padding;
 
 pub struct Model {
     session: Session,
@@ -26,8 +30,8 @@ impl Model {
 
         Ok(Self {
             session,
-            input_name: Box::leak(input_name.into_boxed_str()) as &str,
-            output_name: Box::leak(output_name.into_boxed_str()) as &str,
+            input_name: Box::leak(input_name.into_boxed_str()),
+            output_name: Box::leak(output_name.into_boxed_str()),
             target_size,
         })
     }
@@ -41,26 +45,16 @@ impl Model {
     }
 }
 
-pub fn preprocess(image: &RgbImage, target_size: u32) -> Result<Array3<f32>> {
-    let (w, h) = image.dimensions();
-    let max_dim = w.max(h);
-    let pad = |x| ((max_dim - x) / 2) as i64;
-
-    let mut padded = RgbImage::from_pixel(max_dim, max_dim, Rgb([255, 255, 255]));
-    imageops::overlay(&mut padded, image, pad(w), pad(h));
-
+pub fn preprocess(image: RgbImage, target_size: u32) -> Array3<f32> {
     let resized = imageops::resize(
-        &padded,
+        &image,
         target_size,
         target_size,
         imageops::FilterType::Lanczos3,
     );
-
-    let tensor = Array3::from_shape_vec(
-        (target_size as usize, target_size as usize, 3),
-        resized.into_raw(),
-    )?
-    .mapv(|x| x as f32);
-
-    Ok(tensor)
+    let (padded, _) = resized.padding_square(Rgb([255, 255, 255]));
+    padded
+        .as_ndarray3()
+        .mapv(|x| x.as_())
+        .permuted_axes([1, 2, 0]) // CHW -> HWC
 }
