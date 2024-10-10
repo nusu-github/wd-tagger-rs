@@ -1,0 +1,93 @@
+name: Build Release Binaries
+
+on:
+  release:
+    types:
+      - created
+
+jobs:
+  publish:
+    name: Publish for ${{ matrix.os }}
+
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            targets: x86_64-unknown-linux-gnu
+            asset_name: wd-tagger-rs-linux-amd64
+            extension: tar.gz
+            compress_command: tar -czvf
+          - os: windows-latest
+            targets: x86_64-pc-windows-msvc
+            asset_name: wd-tagger-rs-windows-amd64
+            extension: zip
+            compress_command: 7z a
+          - os: macos-latest
+            targets: aarch64-apple-darwin
+            asset_name: wd-tagger-rs-macos-amd64
+            extension: tar.gz
+            compress_command: tar -czvf
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+
+      - name: Install CUDA
+        if: matrix.os != 'macos-latest'
+        uses: Jimver/cuda-toolkit@master
+        id: cuda-toolkit
+        with:
+          cuda: '12.4.1'
+          method: 'network'
+          sub-packages: '["nvcc"]'
+          non-cuda-sub-packages: '["cudnn9-cuda"]'
+          log-file-suffix: '${{matrix.os}}.txt'
+
+      - name: Build Release Binaries
+        run: cargo build --release  --locked --features cuda,image,image-extra
+
+      - name: Compress and Upload Binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ROOT_FOLDER="${{ github.workspace }}"
+          LICENSE_FILE="$ROOT_FOLDER/LICENSE"
+          README_FILE="$ROOT_FOLDER/README.md"
+          SOURCE_FOLDER="$ROOT_FOLDER/target/release"
+          ASSET_NAME="${{ matrix.asset_name }}.${{ matrix.extension }}"
+          FILES=("wd-tagger-rs" "libonnxruntime.so" "libonnxruntime_providers_shared.so" "libonnxruntime_providers_cuda.so")
+
+          if [ "${{ matrix.os }}" == "windows-latest" ]; then
+            FILES=("wd-tagger-rs.exe" "onnxruntime.dll" "onnxruntime_providers_shared.dll" "onnxruntime_providers_cuda.dll")
+          fi
+
+          if [ "${{ matrix.os }}" == "macos-latest" ]; then
+            FILES=("wd-tagger-rs")
+          fi
+
+          mkdir -p "$ROOT_FOLDER/${{ matrix.asset_name }}"
+          mv "$LICENSE_FILE" "$ROOT_FOLDER/${{ matrix.asset_name }}/LICENSE"
+          mv "$README_FILE" "$ROOT_FOLDER/${{ matrix.asset_name }}/README.md"
+          for file in "${FILES[@]}"; do
+            mv "$SOURCE_FOLDER/$file" "$ROOT_FOLDER/${{ matrix.asset_name }}/$file"
+          done
+
+          ${{ matrix.compress_command }} "$ROOT_FOLDER/$ASSET_NAME" "$ROOT_FOLDER/${{ matrix.asset_name }}"
+
+      - name: Upload binaries
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref }}
+          asset_name: ${{ matrix.asset_name }}.${{ matrix.extension }}
+          file: ${{ github.workspace }}/${{ matrix.asset_name }}.${{ matrix.extension }}
+          overwrite: true

@@ -1,4 +1,4 @@
-use std::{path::Path, sync::OnceLock};
+use std::path::Path;
 
 use anyhow::Result;
 
@@ -10,11 +10,6 @@ const RATING: u32 = 9;
 const GENERAL: u32 = 0;
 const CHARACTER: u32 = 4;
 
-static TAGS: OnceLock<&[&str]> = OnceLock::new();
-static RATING_INDICES: OnceLock<&[usize]> = OnceLock::new();
-static GENERAL_INDICES: OnceLock<&[usize]> = OnceLock::new();
-static CHARACTER_INDICES: OnceLock<&[usize]> = OnceLock::new();
-
 #[derive(serde::Deserialize)]
 struct Label {
     name: String,
@@ -22,6 +17,10 @@ struct Label {
 }
 
 pub struct LabelAnalyzer {
+    tags: Vec<&'static str>,
+    rating_indices: Vec<usize>,
+    general_indices: Vec<usize>,
+    character_indices: Vec<usize>,
     general_threshold: f32,
     general_mcut_enabled: bool,
     character_threshold: f32,
@@ -61,18 +60,11 @@ impl LabelAnalyzer {
             }
         }
 
-        TAGS.set(Box::leak(tags.into_boxed_slice())).unwrap();
-        RATING_INDICES
-            .set(Box::leak(rating_indices.into_boxed_slice()))
-            .unwrap();
-        GENERAL_INDICES
-            .set(Box::leak(general_indices.into_boxed_slice()))
-            .unwrap();
-        CHARACTER_INDICES
-            .set(Box::leak(character_indices.into_boxed_slice()))
-            .unwrap();
-
         Ok(Self {
+            tags,
+            rating_indices,
+            general_indices,
+            character_indices,
             general_threshold,
             general_mcut_enabled,
             character_threshold,
@@ -81,14 +73,14 @@ impl LabelAnalyzer {
     }
 
     pub fn analyze(&self, preds: &[f32]) -> (TagScores, TagScores, TagScores) {
-        let mut ratings = tag_scores(preds, RATING_INDICES.get().unwrap());
+        let mut ratings = self.tag_scores(preds, &self.rating_indices);
         ratings.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-        let general = tag_scores(preds, GENERAL_INDICES.get().unwrap());
+        let general = self.tag_scores(preds, &self.general_indices);
         let mut general = filter_tags(general, self.general_threshold, self.general_mcut_enabled);
         general.sort_unstable_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
 
-        let character = tag_scores(preds, CHARACTER_INDICES.get().unwrap());
+        let character = self.tag_scores(preds, &self.character_indices);
         let mut character = filter_tags(
             character,
             self.character_threshold,
@@ -98,11 +90,10 @@ impl LabelAnalyzer {
 
         (ratings, general, character)
     }
-}
 
-fn tag_scores(preds: &[f32], indices: &[usize]) -> TagScores {
-    let tags = TAGS.get().unwrap();
-    indices.iter().map(|&i| (tags[i], preds[i])).collect()
+    fn tag_scores(&self, preds: &[f32], indices: &[usize]) -> TagScores {
+        indices.iter().map(|&i| (self.tags[i], preds[i])).collect()
+    }
 }
 
 fn filter_tags(tag_scores: TagScores, threshold: f32, mcut_enabled: bool) -> TagScores {

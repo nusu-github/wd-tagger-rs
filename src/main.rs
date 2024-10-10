@@ -42,19 +42,23 @@ pub struct Config {
 
 #[derive(ValueEnum, Clone)]
 enum ModelName {
-    WdSwinv2TaggerV3 = 0,
-    WdConvnextTaggerV3 = 1,
-    WdVitTaggerV3 = 2,
-    WdV14MoatTaggerV2 = 3,
-    WdV14Convnextv2TaggerV2 = 4,
-    WdV14Swinv2TaggerV2 = 5,
-    WdV14ConvnextTaggerV2 = 6,
-    WdV14VitTaggerV2 = 7,
-    WdV14ConvnextTagger = 8,
-    WdV14VitTagger = 9,
+    WdEva02LargeTaggerV3 = 0,
+    WdVitLargeTaggerV3 = 1,
+    WdSwinv2TaggerV3 = 2,
+    WdConvnextTaggerV3 = 3,
+    WdVitTaggerV3 = 4,
+    WdV14MoatTaggerV2 = 5,
+    WdV14Convnextv2TaggerV2 = 6,
+    WdV14Swinv2TaggerV2 = 7,
+    WdV14ConvnextTaggerV2 = 8,
+    WdV14VitTaggerV2 = 9,
+    WdV14ConvnextTagger = 10,
+    WdV14VitTagger = 11,
 }
 
 const MODELS: &[&str] = &[
+    "SmilingWolf/wd-eva02-large-tagger-v3",
+    "SmilingWolf/wd-vit-large-tagger-v3",
     "SmilingWolf/wd-swinv2-tagger-v3",
     "SmilingWolf/wd-convnext-tagger-v3",
     "SmilingWolf/wd-vit-tagger-v3",

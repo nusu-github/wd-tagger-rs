@@ -11,8 +11,8 @@ use crate::padding::Padding;
 
 pub struct Model {
     session: Session,
-    input_name: &'static str,
-    output_name: &'static str,
+    input_name: String,
+    output_name: String,
     pub target_size: u32,
 }
 
@@ -30,15 +30,17 @@ impl Model {
 
         Ok(Self {
             session,
-            input_name: Box::leak(input_name.into_boxed_str()),
-            output_name: Box::leak(output_name.into_boxed_str()),
+            input_name,
+            output_name,
             target_size,
         })
     }
 
     pub fn predict(&self, inputs: ArrayView4<f32>) -> Result<Array2<f32>> {
-        let outputs = self.session.run(ort::inputs![self.input_name => inputs]?)?;
-        Ok(outputs[self.output_name]
+        let outputs = self
+            .session
+            .run(ort::inputs![self.input_name.as_str() => inputs]?)?;
+        Ok(outputs[self.output_name.as_str()]
             .try_extract_tensor::<f32>()?
             .into_dimensionality::<Ix2>()?
             .to_owned())
