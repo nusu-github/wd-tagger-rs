@@ -2,7 +2,7 @@ use anyhow::Result;
 use image::{imageops, ImageBuffer, Pixel};
 use num_traits::AsPrimitive;
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 pub enum Position {
     Top,
     Bottom,
