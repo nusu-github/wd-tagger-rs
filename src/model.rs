@@ -5,7 +5,10 @@ use image::{imageops, Rgb, RgbImage};
 use ndarray::prelude::*;
 use nshare::AsNdarray3;
 use num_traits::AsPrimitive;
-use ort::Session;
+use ort::{
+    execution_providers::{CUDAExecutionProvider, TensorRTExecutionProvider},
+    session::Session,
+};
 
 use crate::padding::Padding;
 
@@ -19,9 +22,14 @@ pub struct Model {
 impl Model {
     pub fn new<P: AsRef<Path>>(model_path: P, device_id: i32) -> Result<Self> {
         let session = Session::builder()?
-            .with_execution_providers([ort::CUDAExecutionProvider::default()
-                .with_device_id(device_id)
-                .build()])?
+            .with_execution_providers([
+                CUDAExecutionProvider::default()
+                    .with_device_id(device_id)
+                    .build(),
+                TensorRTExecutionProvider::default()
+                    .with_device_id(device_id)
+                    .build(),
+            ])?
             .commit_from_file(model_path)?;
 
         let target_size = session.inputs[0].input_type.tensor_dimensions().unwrap()[1] as u32;
